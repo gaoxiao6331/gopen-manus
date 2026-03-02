@@ -16,7 +16,7 @@ func main() {
 	promptFlag := flag.String("prompt", "", "Input prompt for the agent")
 	flag.Parse()
 
-	ag := agent.NewToolCallAgent("manus")
+	ag := agent.NewManusAgent()
 
 	prompt := strings.TrimSpace(*promptFlag)
 	if prompt == "" {
