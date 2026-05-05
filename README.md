@@ -2,6 +2,28 @@
 
 Go port of OpenManus core logic (agents, planning flow, schema), with MCP client support wired via the official MCP Go SDK to connect to OpenManus MCP tools.
 
+## Quick Start
+
+```bash
+export OPENAI_API_KEY=sk-...
+go run ./cmd/manus -prompt "Plan my day"
+# Or run the full planning flow:
+go run ./cmd/run-flow
+```
+
+As long as `OPENAI_API_KEY` is set, `ManusAgent` automatically boots with the OpenAI client; if it is missing, the agent falls back to the built-in `NoopLLM` so you can develop offline.
+
+### Optional environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OPENAI_MODEL` | `gpt-4o` | Model name to use |
+| `OPENAI_MAX_TOKENS` | `2048` | Max tokens in each completion |
+| `OPENAI_MAX_INPUT_TOKENS` | `12000` | Max tokens accepted as input (0 disables the limit) |
+| `OPENAI_TEMPERATURE` | `0.7` | Sampling temperature |
+| `OPENAI_BASE_URL` | empty | Custom OpenAI API base (e.g., proxy) |
+| `OPENMANUS_WORKSPACE` | current working directory | Directory baked into Manus system prompt |
+
 ## Entrypoints
 - `cmd/manus`: mirrors `main.py`
 - `cmd/run-flow`: mirrors `run_flow.py`

@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"gopen-manus/internal/logger"
 	"gopen-manus/internal/planning"
 	"gopen-manus/internal/schema"
+	"gopen-manus/internal/tool"
 )
 
 // PlanningFlow manages planning and execution using agents.
@@ -19,6 +21,7 @@ type PlanningFlow struct {
 	*BaseFlow
 	LLM              llm.Client
 	PlanStore        *planning.Store
+	PlanningTool     *tool.PlanningTool
 	ExecutorKeys     []string
 	ActivePlanID     string
 	CurrentStepIndex *int
@@ -32,10 +35,13 @@ func NewPlanningFlow(agentsInput any, executorKeys []string, planID string) (*Pl
 	if planID == "" {
 		planID = fmt.Sprintf("plan_%d", time.Now().Unix())
 	}
+	store := planning.NewStore()
+	planningTool := tool.NewPlanningTool(store)
 	pf := &PlanningFlow{
 		BaseFlow:     base,
 		LLM:          &llm.NoopLLM{},
-		PlanStore:    planning.NewStore(),
+		PlanStore:    store,
+		PlanningTool: planningTool,
 		ExecutorKeys: executorKeys,
 		ActivePlanID: planID,
 	}
@@ -97,7 +103,67 @@ func (p *PlanningFlow) Execute(ctx context.Context, inputText string) (string, e
 }
 
 func (p *PlanningFlow) createInitialPlan(ctx context.Context, request string) error {
-	_ = ctx
+	if p.PlanningTool == nil || p.LLM == nil {
+		return p.createDefaultPlan(request)
+	}
+
+	systemContent := "You are a planning assistant. Create a concise, actionable plan with clear steps. Focus on key milestones rather than detailed sub-steps. Optimize for clarity and efficiency."
+	if len(p.ExecutorKeys) > 1 {
+		agentsDescription := []map[string]string{}
+		for _, key := range p.ExecutorKeys {
+			if ag, ok := p.Agents[key]; ok {
+				agentsDescription = append(agentsDescription, map[string]string{
+					"name":        strings.ToUpper(key),
+					"description": ag.DescriptionText(),
+				})
+			}
+		}
+		if len(agentsDescription) > 0 {
+			agentInfo, _ := json.Marshal(agentsDescription)
+			systemContent += "\nNow we have multiple agents available: " + string(agentInfo) + ". When creating steps, annotate the responsible agent using the format '[agent_name]'."
+		}
+	}
+
+	systemMsg := schema.SystemMessage(systemContent)
+	userMsg := schema.UserMessage("Create a reasonable plan with clear steps to accomplish the task: "+request, nil)
+	tools := []llm.ToolParam{tool.Param(p.PlanningTool)}
+
+	resp, err := p.LLM.AskTool(ctx, []schema.Message{userMsg}, []schema.Message{systemMsg}, tools, schema.ToolChoiceAuto)
+	if err != nil {
+		logger.Warn.Printf("Plan creation via LLM failed: %v", err)
+		return p.createDefaultPlan(request)
+	}
+	if resp != nil {
+		for _, call := range resp.ToolCalls {
+			if !strings.EqualFold(call.Function.Name, p.PlanningTool.Name()) {
+				continue
+			}
+			arguments := map[string]any{}
+			if call.Function.Arguments != "" {
+				if err := json.Unmarshal([]byte(call.Function.Arguments), &arguments); err != nil {
+					logger.Error.Printf("Failed to parse planning tool arguments: %v", err)
+					continue
+				}
+			}
+			arguments["plan_id"] = p.ActivePlanID
+			result, execErr := p.PlanningTool.Execute(ctx, arguments)
+			if execErr != nil {
+				logger.Error.Printf("Planning tool execution error: %v", execErr)
+				continue
+			}
+			if result.Error == "" {
+				logger.Info.Printf("Plan created via LLM for %s", p.ActivePlanID)
+				return nil
+			}
+			logger.Warn.Printf("Planning tool reported error: %s", result.Error)
+		}
+	}
+
+	logger.Warn.Println("Falling back to default plan creation")
+	return p.createDefaultPlan(request)
+}
+
+func (p *PlanningFlow) createDefaultPlan(request string) error {
 	title := fmt.Sprintf("Plan for: %s", truncate(request, 50))
 	steps := []string{"Analyze request", "Execute task", "Verify results"}
 	_, err := p.PlanStore.Create(p.ActivePlanID, title, steps)

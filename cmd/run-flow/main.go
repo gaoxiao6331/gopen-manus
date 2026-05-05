@@ -24,7 +24,7 @@ func main() {
 	}
 
 	agents := map[string]agent.Agent{
-		"manus": agent.NewToolCallAgent("manus"),
+		"manus": agent.NewManusAgent(),
 	}
 
 	factory := &flow.Factory{}

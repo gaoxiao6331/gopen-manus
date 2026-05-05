@@ -36,10 +36,13 @@ func main() {
 		return
 	}
 	if *interactive {
-		fmt.Println("\nMCP Agent Interactive Mode (type 'exit' to quit)\n")
+		fmt.Println()
+		fmt.Println("MCP Agent Interactive Mode (type 'exit' to quit)")
+		fmt.Println()
 		reader := bufio.NewReader(os.Stdin)
 		for {
-			fmt.Print("\nEnter your request: ")
+			fmt.Println()
+			fmt.Print("Enter your request: ")
 			line, _ := reader.ReadString('\n')
 			line = strings.TrimSpace(line)
 			if line == "exit" || line == "quit" || line == "q" {
