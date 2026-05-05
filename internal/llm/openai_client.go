@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"gopen-manus/internal/schema"
 
@@ -82,54 +83,112 @@ func (o *OpenAIClient) Ask(ctx context.Context, messages []schema.Message, syste
 }
 
 func (o *OpenAIClient) formatMessages(messages []schema.Message, systemMsgs []schema.Message) ([]openai.ChatCompletionMessage, error) {
-	var formattedMessages []openai.ChatCompletionMessage
+	formattedMessages := make([]openai.ChatCompletionMessage, 0, len(systemMsgs)+len(messages))
 
-	// Prepend system messages
 	for _, msg := range systemMsgs {
-		formattedMessages = append(formattedMessages, openai.ChatCompletionMessage{
-			Role:    string(msg.Role),
-			Content: *msg.Content,
-		})
+		formattedMessages = append(formattedMessages, toOpenAIMessage(msg))
 	}
 
-	// Append user/assistant messages
 	for _, msg := range messages {
-		if msg.Role == schema.RoleUser && msg.Base64Image != nil {
-			// Handle multimodal user message
-			formattedMessages = append(formattedMessages, openai.ChatCompletionMessage{
-				Role: string(schema.RoleUser),
-				MultiContent: []openai.ChatMessagePart{
-					{
-						Type: openai.ChatMessagePartTypeText,
-						Text: *msg.Content,
-					},
-					{
-						Type: openai.ChatMessagePartTypeImageURL,
-						ImageURL: &openai.ChatMessageImageURL{
-							URL:    fmt.Sprintf("data:image/jpeg;base64,%s", *msg.Base64Image),
-							Detail: openai.ImageURLDetailAuto,
-						},
-					},
-				},
-			})
-		} else {
-			// Handle regular message
-			formattedMessages = append(formattedMessages, openai.ChatCompletionMessage{
-				Role:    string(msg.Role),
-				Content: *msg.Content,
-			})
-		}
+		formattedMessages = append(formattedMessages, toOpenAIMessage(msg))
 	}
 
 	return formattedMessages, nil
 }
 
+func toOpenAIMessage(msg schema.Message) openai.ChatCompletionMessage {
+	role := string(msg.Role)
+	switch msg.Role {
+	case schema.RoleUser:
+		if msg.Base64Image != nil {
+			return openai.ChatCompletionMessage{
+				Role:         role,
+				MultiContent: multimodalParts(msg.Content, *msg.Base64Image),
+			}
+		}
+	case schema.RoleAssistant:
+		if len(msg.ToolCalls) > 0 {
+			return openai.ChatCompletionMessage{
+				Role:      role,
+				Content:   safeText(msg.Content),
+				ToolCalls: toOpenAIToolCalls(msg.ToolCalls),
+			}
+		}
+	case schema.RoleTool:
+		return openai.ChatCompletionMessage{
+			Role:       role,
+			Content:    safeText(msg.Content),
+			Name:       safePointer(msg.Name),
+			ToolCallID: safePointer(msg.ToolCallID),
+		}
+	}
+
+	return openai.ChatCompletionMessage{
+		Role:    role,
+		Content: safeText(msg.Content),
+	}
+}
+
+func multimodalParts(content *string, base64 string) []openai.ChatMessagePart {
+	parts := []openai.ChatMessagePart{}
+	text := safeText(content)
+	if strings.TrimSpace(text) != "" {
+		parts = append(parts, openai.ChatMessagePart{
+			Type: openai.ChatMessagePartTypeText,
+			Text: text,
+		})
+	}
+	parts = append(parts, openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeImageURL,
+		ImageURL: &openai.ChatMessageImageURL{
+			URL:    fmt.Sprintf("data:image/jpeg;base64,%s", base64),
+			Detail: openai.ImageURLDetailAuto,
+		},
+	})
+	return parts
+}
+
+func safeText(ptr *string) string {
+	if ptr == nil {
+		return ""
+	}
+	return *ptr
+}
+
+func safePointer(ptr *string) string {
+	if ptr == nil {
+		return ""
+	}
+	return *ptr
+}
+
+func toOpenAIToolCalls(calls []schema.ToolCall) []openai.ToolCall {
+	result := make([]openai.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		result = append(result, openai.ToolCall{
+			ID:   call.ID,
+			Type: openai.ToolType(call.Type),
+			Function: openai.FunctionCall{
+				Name:      call.Function.Name,
+				Arguments: call.Function.Arguments,
+			},
+		})
+	}
+	return result
+}
+
 func (o *OpenAIClient) countMessageTokens(messages []openai.ChatCompletionMessage) int {
 	var totalTokens int
 	for _, msg := range messages {
+		if len(msg.MultiContent) > 0 {
+			for _, part := range msg.MultiContent {
+				if part.Type == openai.ChatMessagePartTypeText {
+					totalTokens += o.tokenCounter.CountText(part.Text)
+				}
+			}
+			continue
+		}
 		totalTokens += o.tokenCounter.CountText(msg.Content)
-		// Note: This is a simplified token counting for multimodal messages.
-		// A more accurate implementation would parse the MultiContent field.
 	}
 	return totalTokens
 }
