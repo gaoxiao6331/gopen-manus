@@ -21,8 +21,12 @@ As long as `OPENAI_API_KEY` is set, `ManusAgent` automatically boots with the Op
 | `OPENAI_MAX_TOKENS` | `2048` | Max tokens in each completion |
 | `OPENAI_MAX_INPUT_TOKENS` | `12000` | Max tokens accepted as input (0 disables the limit) |
 | `OPENAI_TEMPERATURE` | `0.7` | Sampling temperature |
-| `OPENAI_BASE_URL` | empty | Custom OpenAI API base (e.g., proxy) |
+| `OPENAI_API_BASE_URL` | empty | Preferred OpenAI-compatible base URL (e.g., `https://api.longcat.chat/openai`) |
+| `OPENAI_BASE_URL` | empty | Fallback OpenAI API base (legacy name, used if `OPENAI_API_BASE_URL` is unset) |
 | `OPENMANUS_WORKSPACE` | current working directory | Directory baked into Manus system prompt |
+
+Timeouts and other defaults live in `internal/config/config.go`. Adjust `config.Settings.LLM.RequestTimeout`
+(a `time.Duration`) there if you need to cap network calls when using OpenAI-compatible providers.
 
 ## Entrypoints
 - `cmd/manus`: mirrors `main.py`

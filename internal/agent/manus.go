@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
+	"gopen-manus/internal/config"
 	"gopen-manus/internal/llm"
 	"gopen-manus/internal/logger"
 	"gopen-manus/internal/planning"
@@ -68,8 +70,12 @@ func configureDefaultLLM(agent *ToolCallAgent) {
 	}
 
 	cfg := openai.DefaultConfig(apiKey)
-	if baseURL := os.Getenv("OPENAI_BASE_URL"); baseURL != "" {
+	if baseURL := selectOpenAIBaseURL(); baseURL != "" {
 		cfg.BaseURL = baseURL
+	}
+
+	if timeout := config.Settings.LLM.RequestTimeout; timeout > 0 {
+		cfg.HTTPClient = &http.Client{Timeout: timeout}
 	}
 
 	model := getenvDefault("OPENAI_MODEL", "gpt-4o")
@@ -94,6 +100,27 @@ func getenvDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func selectOpenAIBaseURL() string {
+	keys := []string{"OPENAI_API_BASE_URL", "OPENAI_BASE_URL"}
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return sanitizeBaseURL(value)
+		}
+	}
+	return ""
+}
+
+func sanitizeBaseURL(base string) string {
+	trimmed := strings.TrimSpace(base)
+	if trimmed == "" {
+		return ""
+	}
+	for strings.HasSuffix(trimmed, "/") {
+		trimmed = strings.TrimSuffix(trimmed, "/")
+	}
+	return trimmed
 }
 
 func getenvInt(key string, fallback int) int {
